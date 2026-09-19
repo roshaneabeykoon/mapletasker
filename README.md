@@ -5,7 +5,7 @@ A lead-gen marketplace for household tasks.
 - **Clients** post tasks for free.
 - **Taskers** spend tokens to unlock a task's contact details.
 
-This repo is **phase 1**: the project foundation (Next.js + Prisma + Postgres and a database-backed health check).
+This repo is at **phase 2**: the client flow — posting a task and managing it through a magic link. No tasker features yet.
 
 ## Stack
 
@@ -15,6 +15,7 @@ This repo is **phase 1**: the project foundation (Next.js + Prisma + Postgres an
 | Styling  | Tailwind CSS v4                     |
 | Database | PostgreSQL                          |
 | ORM      | Prisma 7 (`@prisma/adapter-pg`)     |
+| Email    | Resend                              |
 
 ## Prerequisites
 
@@ -73,6 +74,16 @@ DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/mapletasker_dev?schema=p
   `postgresql://roshane@localhost:5432/mapletasker_dev?schema=public`
 - `5432` is the default port; change it if your instance listens elsewhere.
 
+Email is configured with three more variables (see `.env.example` for the full comments):
+
+| Variable         | Required | Purpose                                                                 |
+| ---------------- | -------- | ----------------------------------------------------------------------- |
+| `RESEND_API_KEY` | No       | Sends the magic-link email. Unset → email is skipped and logged instead. |
+| `EMAIL_FROM`     | No       | Sender address. Defaults to Resend's shared `onboarding@resend.dev`.     |
+| `APP_URL`        | No       | Base URL for links in emails. Defaults to `http://localhost:3000`.       |
+
+Nothing here blocks local development: without `RESEND_API_KEY` the app still creates tasks and shows the magic link on the confirmation page. With the default sender, Resend will only deliver to your own account address or to its test inbox `delivered@resend.dev`.
+
 `.env.local` is gitignored and must never be committed. `.env.example` is the committed template.
 
 ### 4. Run migrations
@@ -110,6 +121,27 @@ Expected response:
 
 If the database is unreachable the route returns HTTP **503** with `"status": "error"` and the underlying message.
 
+## The client flow
+
+Clients never sign in. Posting a task mints a **magic token** (32 random bytes, URL-safe base64), and possession of that token is the only authorization needed to manage the task.
+
+| Page                | What it does                                                             |
+| ------------------- | ------------------------------------------------------------------------ |
+| `/post-task`        | The posting form. Submits to `POST /api/tasks`.                           |
+| `/post-task/confirmation` | Shows the magic link with a copy button, in case the email is slow. |
+| `/manage/[token]`   | Loads the task, edits it, or deletes it behind a confirmation step.       |
+
+| Endpoint                          | Behaviour                                                                    |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| `POST /api/tasks`                 | Validates input, creates the task with `status: "open"`, emails the link. `201` with the task (including `magicToken`) and `emailSent`. Invalid input → `422` with per-field errors. |
+| `GET /api/tasks/manage/[token]`   | The matching task, or `404`.                                                   |
+| `PATCH /api/tasks/manage/[token]` | Updates `name`, `category`, `urgency`, `location`, `budget`, `description`. `404` if the token doesn't match, `422` if nothing valid was sent. |
+| `DELETE /api/tasks/manage/[token]`| **Soft** delete: sets `deletedAt` and `status: "cancelled"`. The row stays so unlock history remains auditable. |
+
+Soft-deleted tasks are invisible to every route, so the magic link stops working after deletion.
+
+`email` is deliberately **not** editable — it's the address the magic link was sent to. A failed email never fails the request: the task is already created and the link is shown in the UI and logged.
+
 ## Scripts
 
 | Command               | Description                                        |
@@ -131,10 +163,20 @@ prisma/
   migrations/            Migration history
 src/
   app/
-    api/health/route.ts  DB-backed health check
-    page.tsx             Placeholder landing page
-  lib/prisma.ts          Prisma client singleton (pg driver adapter)
-  generated/prisma/      Generated client (gitignored)
+    api/health/route.ts                  DB-backed health check
+    api/tasks/route.ts                   POST: create a task + email the magic link
+    api/tasks/manage/[token]/route.ts    GET / PATCH / DELETE by magic token
+    post-task/                           Posting form + confirmation page
+    manage/[token]/                      Edit / delete a task via magic link
+    page.tsx                             Landing page
+  components/
+    TaskForm.tsx                         Shared form for creating and editing
+    MagicLinkPanel.tsx                   Magic link display + copy button
+  lib/
+    prisma.ts                            Prisma client singleton (pg driver adapter)
+    tasks.ts                             Field constants, validation, token generation
+    email.ts                             Resend client + magic-link email
+  generated/prisma/                      Generated client (gitignored)
 prisma7.config.ts        Prisma CLI config; loads .env.local
 .env.example             Template for .env.local
 ```
@@ -147,7 +189,7 @@ prisma7.config.ts        Prisma CLI config; loads .env.local
 
 ## Data model
 
-- **Task** — a client's posted job. `magicToken` is a unique token for passwordless access to their own task.
+- **Task** — a client's posted job. `magicToken` is a unique token for passwordless access to their own task. `deletedAt` marks a soft delete; `status` is one of `open`, `claimed`, `done`, `cancelled`.
 - **Tasker** — a registered tasker. Starts with a `tokenBalance` of 5.
 - **Unlock** — records that a tasker paid to reveal a task. Unique on `(taskerId, taskId)` so a tasker is never charged twice for the same task.
 - **WalletTransaction** — token ledger: `signup_grant`, `unlock_spend`, `stripe_topup`.

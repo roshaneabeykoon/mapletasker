@@ -19,10 +19,13 @@ model Task {
   location    String
   budget      Decimal
   description String?
-  status      String   @default("open") // open, claimed, done
+  status      String   @default("open") // open, claimed, done, cancelled
   magicToken  String   @unique
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  // Soft delete: rows are never removed, so unlocks stay auditable.
+  deletedAt DateTime?
 }
 
 model Tasker {
