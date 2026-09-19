@@ -1,0 +1,56 @@
+// MapleTasker database schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Task {
+  id          String   @id @default(uuid())
+  name        String
+  email       String
+  category    String
+  urgency     String
+  location    String
+  budget      Decimal
+  description String?
+  status      String   @default("open") // open, claimed, done
+  magicToken  String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Tasker {
+  id           String              @id @default(uuid())
+  email        String              @unique
+  passwordHash String
+  tokenBalance Int                 @default(5)
+  createdAt    DateTime            @default(now())
+  unlocks      Unlock[]
+  transactions WalletTransaction[]
+}
+
+model Unlock {
+  id        String   @id @default(uuid())
+  taskerId  String
+  taskId    String
+  tasker    Tasker   @relation(fields: [taskerId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([taskerId, taskId])
+}
+
+model WalletTransaction {
+  id              String   @id @default(uuid())
+  taskerId        String
+  tasker          Tasker   @relation(fields: [taskerId], references: [id])
+  type            String // signup_grant, unlock_spend, stripe_topup
+  amount          Int
+  stripePaymentId String?
+  createdAt       DateTime @default(now())
+}
