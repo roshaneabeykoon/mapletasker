@@ -14,6 +14,7 @@ model Task {
   id          String   @id @default(uuid())
   name        String
   email       String
+  phone       String?
   category    String
   urgency     String
   location    String
@@ -32,10 +33,29 @@ model Tasker {
   id           String              @id @default(uuid())
   email        String              @unique
   passwordHash String
-  tokenBalance Int                 @default(5)
+  tokenBalance Int                 @default(0)
   createdAt    DateTime            @default(now())
   unlocks      Unlock[]
   transactions WalletTransaction[]
+
+  /// Null until the tasker clicks their verification link. The signup token
+  /// grant is withheld until this is set, so creating throwaway accounts
+  /// doesn't farm free unlocks.
+  emailVerifiedAt     DateTime?
+  verificationTokens  EmailVerificationToken[]
+}
+
+/// One-time link a new tasker must click to confirm their address and
+/// receive the signup token grant. Deleted once used, so it can't be replayed.
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  taskerId  String
+  tasker    Tasker   @relation(fields: [taskerId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([taskerId])
 }
 
 model Unlock {
@@ -48,6 +68,16 @@ model Unlock {
   @@unique([taskerId, taskId])
 }
 
+/// One row per throttled attempt. Rows are counted within a time window and
+/// pruned once stale — see src/lib/rate-limit.ts.
+model RateLimitHit {
+  id        String   @id @default(uuid())
+  bucket    String
+  createdAt DateTime @default(now())
+
+  @@index([bucket, createdAt])
+}
+
 model WalletTransaction {
   id              String   @id @default(uuid())
   taskerId        String
@@ -57,3 +87,4 @@ model WalletTransaction {
   stripePaymentId String?
   createdAt       DateTime @default(now())
 }
+ 

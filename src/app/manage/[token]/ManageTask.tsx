@@ -16,6 +16,7 @@ function toFormValues(task: SerializedTask): TaskFormValues {
   return {
     name: task.name,
     email: task.email,
+    phone: task.phone ?? "",
     category: task.category,
     urgency: task.urgency,
     location: task.location,
@@ -27,6 +28,7 @@ function toFormValues(task: SerializedTask): TaskFormValues {
 export default function ManageTask({ token }: { token: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [saved, setSaved] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
@@ -69,10 +71,12 @@ export default function ManageTask({ token }: { token: string }) {
   const handleSubmit = useCallback(
     async (values: TaskFormValues): Promise<SubmitOutcome> => {
       setSaved(false);
+      setWarning(null);
 
       let response: Response;
       let payload: {
         task?: SerializedTask;
+        warning?: string | null;
         error?: string;
         fields?: Record<string, string>;
       };
@@ -83,6 +87,7 @@ export default function ManageTask({ token }: { token: string }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             name: values.name,
+            phone: values.phone || null,
             category: values.category,
             urgency: values.urgency,
             location: values.location,
@@ -104,6 +109,7 @@ export default function ManageTask({ token }: { token: string }) {
       }
 
       setState({ status: "ready", task: payload.task });
+      setWarning(payload.warning ?? null);
       setSaved(true);
       return { errors: {} };
     },
@@ -197,6 +203,15 @@ export default function ManageTask({ token }: { token: string }) {
           className="mt-6 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300"
         >
           Changes saved.
+        </p>
+      )}
+
+      {warning && (
+        <p
+          role="status"
+          className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          {warning}
         </p>
       )}
 

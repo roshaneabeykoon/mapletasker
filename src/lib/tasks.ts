@@ -1,3 +1,5 @@
+import { generateSecureToken } from "@/lib/tokens";
+
 export const TASK_CATEGORIES = [
   "Cleaning",
   "Handyman",
@@ -16,23 +18,13 @@ export const TASK_URGENCIES = [
 
 const URGENCY_VALUES: readonly string[] = TASK_URGENCIES.map((u) => u.value);
 
-/**
- * 32 random bytes as URL-safe base64 (43 chars). Unguessable, so it can act as
- * the sole credential for managing a task. Uses Web Crypto so this module stays
- * importable from client components (which need the field constants below).
- */
-export function generateMagicToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
+/** Unguessable, so it can act as the sole credential for managing a task. */
+export const generateMagicToken = generateSecureToken;
 
 export type TaskInput = {
   name: string;
   email: string;
+  phone: string | null;
   category: string;
   urgency: string;
   location: string;
@@ -44,7 +36,9 @@ export type ValidationResult<T> =
   | { ok: true; data: T }
   | { ok: false; errors: Record<string, string> };
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Digits, plus separators people actually type: spaces, dots, dashes, brackets. */
+const PHONE_PATTERN = /^[+]?[\d\s().-]+$/;
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -63,6 +57,22 @@ const validators: Record<keyof TaskInput, FieldValidator> = {
     const email = asString(value).toLowerCase();
     if (!EMAIL_PATTERN.test(email)) errors.email = "Please enter a valid email address.";
     return email;
+  },
+  // Optional. Kept as the client typed it — formatting is a display concern,
+  // and normalizing risks mangling extensions or international numbers.
+  phone: (value, errors) => {
+    if (value === null || value === undefined || asString(value) === "") return null;
+    const phone = asString(value);
+    const digits = phone.replace(/\D/g, "").length;
+
+    if (!PHONE_PATTERN.test(phone)) {
+      errors.phone = "Please enter a phone number using digits only.";
+    } else if (digits < 10) {
+      errors.phone = "Please enter a phone number with at least 10 digits.";
+    } else if (digits > 15) {
+      errors.phone = "That phone number looks too long.";
+    }
+    return phone;
   },
   category: (value, errors) => {
     const category = asString(value);
@@ -108,6 +118,7 @@ const validators: Record<keyof TaskInput, FieldValidator> = {
 /** Fields a client may change later via their magic link. Email is fixed: it's where the link was sent. */
 export const EDITABLE_TASK_FIELDS = [
   "name",
+  "phone",
   "category",
   "urgency",
   "location",
@@ -160,6 +171,7 @@ type TaskRow = {
   id: string;
   name: string;
   email: string;
+  phone: string | null;
   category: string;
   urgency: string;
   location: string;
@@ -195,4 +207,86 @@ export function serializeTask(task: TaskRow): SerializedTask {
 
 export function urgencyLabel(value: string): string {
   return TASK_URGENCIES.find((u) => u.value === value)?.label ?? value;
+}
+
+/** Words of a description shown to taskers before they unlock a task. */
+export const TASK_PREVIEW_WORDS = 25;
+
+/**
+ * Tokens charged to reveal a task's contact details. Phase 4 must debit this
+ * same constant so the button label can't drift from what's actually spent.
+ */
+export const UNLOCK_TOKEN_COST = 1;
+
+/**
+ * Trims text to a word count, appending an ellipsis when anything was cut.
+ * Applied on the server so the untruncated text never reaches the browser.
+ */
+export function truncateWords(
+  text: string | null,
+  maxWords = TASK_PREVIEW_WORDS,
+): string | null {
+  if (!text) return null;
+
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maxWords) return words.join(" ");
+
+  return `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+export const CONTACT_PLACEHOLDER = "[hidden]";
+
+/** TLD is letters-only so trailing punctuation ("…@example.com, and") isn't swallowed. */
+const EMAIL_LIKE = /[^\s@]+@[^\s@]+\.[A-Za-z]{2,}/g;
+/** Digit runs with common separators; the digit-count check below filters these down. */
+const PHONE_LIKE = /\+?\d[\d\s().-]{7,}\d/g;
+
+export type RedactedContact = "phone" | "email";
+
+/**
+ * Removes contact details a client typed into free text. Taskers pay to unlock
+ * contact info, so leaving a phone number in a description would let them route
+ * around the unlock entirely.
+ *
+ * This is a deterrent, not a guarantee — "four one six..." style evasion still
+ * gets through. Deliberately conservative: a candidate is only treated as a
+ * phone number when it holds 10-15 digits, so budgets and measurements
+ * ("1200 - 1500", "12 x 24 ft") survive untouched.
+ */
+export function redactContactInfo(text: string | null): {
+  text: string | null;
+  removed: RedactedContact[];
+} {
+  if (!text) return { text, removed: [] };
+
+  const removed = new Set<RedactedContact>();
+
+  // Emails first: an address can contain long digit runs that look phone-ish.
+  let result = text.replace(EMAIL_LIKE, () => {
+    removed.add("email");
+    return CONTACT_PLACEHOLDER;
+  });
+
+  result = result.replace(PHONE_LIKE, (match) => {
+    const digits = match.replace(/\D/g, "").length;
+    if (digits < 10 || digits > 15) return match;
+    removed.add("phone");
+    return CONTACT_PLACEHOLDER;
+  });
+
+  return { text: result, removed: [...removed] };
+}
+
+/** User-facing explanation of what `redactContactInfo` took out, if anything. */
+export function contactWarning(removed: RedactedContact[]): string | null {
+  if (removed.length === 0) return null;
+
+  const what =
+    removed.length === 2
+      ? "a phone number and an email address"
+      : removed[0] === "phone"
+        ? "a phone number"
+        : "an email address";
+
+  return `We removed ${what} from your description. Taskers receive your contact details when they unlock your task.`;
 }

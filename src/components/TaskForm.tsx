@@ -6,6 +6,7 @@ import { TASK_CATEGORIES, TASK_URGENCIES } from "@/lib/tasks";
 export type TaskFormValues = {
   name: string;
   email: string;
+  phone: string;
   category: string;
   urgency: string;
   location: string;
@@ -18,6 +19,7 @@ export type SubmitOutcome = { errors?: Record<string, string> } | void;
 const EMPTY_VALUES: TaskFormValues = {
   name: "",
   email: "",
+  phone: "",
   category: "",
   urgency: "",
   location: "",
@@ -76,7 +78,9 @@ export default function TaskForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5" noValidate>
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+      <p className="text-xs text-gray-500">All fields are required unless marked optional.</p>
+
       {errors._ && (
         <p
           role="alert"
@@ -97,6 +101,8 @@ export default function TaskForm({
           value={values.name}
           onChange={(e) => update("name", e.target.value)}
           autoComplete="name"
+          required
+          maxLength={100}
         />
         <FieldError message={errors.name} />
       </div>
@@ -115,6 +121,7 @@ export default function TaskForm({
               value={values.email}
               onChange={(e) => update("email", e.target.value)}
               autoComplete="email"
+              required
             />
             <p className="mt-1.5 text-xs text-gray-500">
               We&apos;ll email you a private link to manage this task.
@@ -131,6 +138,26 @@ export default function TaskForm({
         <FieldError message={errors.email} />
       </div>
 
+      <div>
+        <label className={labelClass} htmlFor="phone">
+          Phone <span className="font-normal text-gray-500">(optional)</span>
+        </label>
+        <input
+          id="phone"
+          name="phone"
+          type="tel"
+          className={fieldClass}
+          placeholder="(416) 555-0134"
+          value={values.phone}
+          onChange={(e) => update("phone", e.target.value)}
+          autoComplete="tel"
+        />
+        <p className="mt-1.5 text-xs text-gray-500">
+          Only shared with taskers who unlock your task.
+        </p>
+        <FieldError message={errors.phone} />
+      </div>
+
       <div className="grid gap-5 sm:grid-cols-2">
         <div>
           <label className={labelClass} htmlFor="category">
@@ -142,6 +169,7 @@ export default function TaskForm({
             className={fieldClass}
             value={values.category}
             onChange={(e) => update("category", e.target.value)}
+            required
           >
             <option value="">Choose one…</option>
             {TASK_CATEGORIES.map((category) => (
@@ -163,6 +191,7 @@ export default function TaskForm({
             className={fieldClass}
             value={values.urgency}
             onChange={(e) => update("urgency", e.target.value)}
+            required
           >
             <option value="">Choose one…</option>
             {TASK_URGENCIES.map((urgency) => (
@@ -187,6 +216,8 @@ export default function TaskForm({
             placeholder="Toronto, ON"
             value={values.location}
             onChange={(e) => update("location", e.target.value)}
+            required
+            maxLength={200}
           />
           <FieldError message={errors.location} />
         </div>
@@ -206,6 +237,7 @@ export default function TaskForm({
             placeholder="120"
             value={values.budget}
             onChange={(e) => update("budget", e.target.value)}
+            required
           />
           <FieldError message={errors.budget} />
         </div>
@@ -223,7 +255,12 @@ export default function TaskForm({
           placeholder="What needs doing? Include any details a tasker should know."
           value={values.description}
           onChange={(e) => update("description", e.target.value)}
+          maxLength={2000}
         />
+        <p className="mt-1.5 text-xs text-gray-500">
+          No need for a phone number or email here — we remove them. Taskers get your contact
+          details when they unlock your task.
+        </p>
         <FieldError message={errors.description} />
       </div>
 

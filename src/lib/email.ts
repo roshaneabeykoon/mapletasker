@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { SIGNUP_GRANT } from "@/lib/auth";
 
 const DEFAULT_FROM = "MapleTasker <onboarding@resend.dev>";
 
@@ -9,6 +10,10 @@ export function appUrl(): string {
 
 export function manageUrl(magicToken: string): string {
   return `${appUrl()}/manage/${magicToken}`;
+}
+
+export function verifyEmailUrl(token: string): string {
+  return `${appUrl()}/verify-email/${token}`;
 }
 
 let client: Resend | null = null;
@@ -72,6 +77,47 @@ export async function sendTaskCreatedEmail(task: TaskEmailPayload): Promise<bool
 
   if (error) {
     console.error("Failed to send task confirmation email:", error);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Emails a tasker their one-time verification link. Also never throws — the
+ * account already exists either way, and the tasker can request a resend.
+ */
+export async function sendVerificationEmail(tasker: { email: string; token: string }): Promise<boolean> {
+  const resend = getClient();
+  const link = verifyEmailUrl(tasker.token);
+
+  if (!resend) {
+    console.warn(
+      `RESEND_API_KEY is not set; skipping verification email. Verify link: ${link}`,
+    );
+    return false;
+  }
+
+  const html = `
+    <div style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111">
+      <h2>Confirm your email to get ${SIGNUP_GRANT} free tokens</h2>
+      <p>Welcome to MapleTasker. Click below to verify your email address and unlock your ${SIGNUP_GRANT} free tokens for browsing tasks.</p>
+      <p><a href="${link}" style="display:inline-block;background:#b91c1c;color:#fff;padding:12px 20px;border-radius:6px;text-decoration:none">Verify my email</a></p>
+      <p style="font-size:12px;color:#555">Or paste this into your browser:<br>${link}</p>
+      <p style="font-size:12px;color:#555">This link expires in 24 hours.</p>
+    </div>
+  `;
+
+  const { error } = await resend.emails.send({
+    from: process.env.EMAIL_FROM ?? DEFAULT_FROM,
+    to: tasker.email,
+    subject: `Verify your email to get ${SIGNUP_GRANT} free tokens — MapleTasker`,
+    html,
+    text: `Welcome to MapleTasker. Verify your email to unlock your ${SIGNUP_GRANT} free tokens:\n${link}\n\nThis link expires in 24 hours.`,
+  });
+
+  if (error) {
+    console.error("Failed to send verification email:", error);
     return false;
   }
 

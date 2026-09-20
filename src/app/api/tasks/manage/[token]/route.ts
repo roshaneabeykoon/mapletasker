@@ -1,5 +1,11 @@
 import { prisma } from "@/lib/prisma";
-import { serializeTask, validateTaskUpdate } from "@/lib/tasks";
+import {
+  contactWarning,
+  redactContactInfo,
+  serializeTask,
+  validateTaskUpdate,
+  type RedactedContact,
+} from "@/lib/tasks";
 
 const NOT_FOUND = { error: "No task found for that link." };
 
@@ -42,6 +48,15 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/tasks/mana
     );
   }
 
+  // Edits go through the same contact-stripping as the original post.
+  const data = { ...result.data };
+  let removed: RedactedContact[] = [];
+  if ("description" in data) {
+    const redacted = redactContactInfo(data.description ?? null);
+    data.description = redacted.text;
+    removed = redacted.removed;
+  }
+
   try {
     // Possession of the token is the authorization check.
     const existing = await findLiveTask(token);
@@ -49,10 +64,10 @@ export async function PATCH(request: Request, ctx: RouteContext<"/api/tasks/mana
 
     const task = await prisma.task.update({
       where: { id: existing.id },
-      data: result.data,
+      data,
     });
 
-    return Response.json({ task: serializeTask(task) });
+    return Response.json({ task: serializeTask(task), warning: contactWarning(removed) });
   } catch (error) {
     console.error("Failed to update task:", error);
     return Response.json({ error: "Could not update the task." }, { status: 500 });

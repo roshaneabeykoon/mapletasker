@@ -10,9 +10,10 @@ export const metadata: Metadata = {
 export default async function ConfirmationPage(
   props: PageProps<"/post-task/confirmation">,
 ) {
-  const { token, email } = await props.searchParams;
+  const { token, email, redacted } = await props.searchParams;
   const magicToken = typeof token === "string" ? token : "";
   const emailFailed = email === "failed";
+  const contactRedacted = redacted === "1";
 
   if (!magicToken) {
     return (
@@ -38,6 +39,16 @@ export default async function ConfirmationPage(
           ? "We couldn't send your confirmation email just now, so save this link — it's the only way back to your task."
           : "We've emailed you this link too, but email can take a few minutes. Save it now just in case."}
       </p>
+
+      {contactRedacted && (
+        <p
+          role="status"
+          className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200"
+        >
+          We removed contact details from your description. Taskers receive your name, email,
+          and phone number when they unlock your task — you don&apos;t need to include them.
+        </p>
+      )}
 
       <div className="mt-8">
         <MagicLinkPanel url={manageUrl(magicToken)} />

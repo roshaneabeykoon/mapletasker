@@ -11,6 +11,7 @@ export default function PostTaskForm() {
     let payload: {
       task?: { magicToken: string };
       emailSent?: boolean;
+      warning?: string | null;
       error?: string;
       fields?: Record<string, string>;
     };
@@ -19,7 +20,11 @@ export default function PostTaskForm() {
       response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...values, description: values.description || null }),
+        body: JSON.stringify({
+          ...values,
+          phone: values.phone || null,
+          description: values.description || null,
+        }),
       });
       payload = await response.json();
     } catch {
@@ -34,6 +39,7 @@ export default function PostTaskForm() {
 
     const params = new URLSearchParams({ token: payload.task.magicToken });
     if (!payload.emailSent) params.set("email", "failed");
+    if (payload.warning) params.set("redacted", "1");
     router.push(`/post-task/confirmation?${params.toString()}`);
   }
 
