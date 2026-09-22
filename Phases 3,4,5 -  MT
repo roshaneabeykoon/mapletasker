@@ -1,0 +1,59 @@
+Quick fix to the tasker signup flow from phase 3: the free signup grant should be 3 tokens, not 5. Please update:
+1. The default tokenBalance on new Tasker records from 5 to 3.
+2. The signup_grant WalletTransaction amount from 5 to 3.
+3. Any UI text referencing "5 free tokens" to say "3 free tokens".
+Confirm with a fresh signup that the new tasker ends up with tokenBalance = 3 and one signup_grant ledger row of +3.
+
+----------------------
+This is phase 4 of MapleTasker, building on phases 1-3 (schema in place; client task posting and magic-link management working; tasker signup/login/session auth working, with a 3-token free signup grant; GET /api/tasks lists open tasks in locked form). This phase adds the unlock flow: spending tokens to reveal a client's full contact details.
+
+Pricing rule: unlocking one task costs 1 token. Taskers start with 3 free tokens, so their first 3 unlocks are free; after that they need a paid balance.
+
+Build in this order — API first, tested directly, then the pages that call it:
+
+1. POST /api/tasks/[id]/unlock — for the logged-in tasker:
+   - Check tokenBalance >= 1. If not, return a clear error (e.g. 402 Payment Required) so the frontend can redirect to the wallet/top-up flow.
+   - Check whether an Unlock row already exists for this tasker+task. If it does, just return the task's full details again at no charge — never charge twice for the same task.
+   - Otherwise, in a single database transaction: insert an Unlock row (unique constraint on taskerId+taskId), decrement tokenBalance by 1, and insert a WalletTransaction row with type "unlock_spend" and amount -1.
+   - Return the task's full details (including the client's name, email, and description) on success.
+
+2. GET /api/tasks/[id] — returns the task's locked fields (category, urgency, location, budget) to any logged-in tasker, and additionally the full details (name, email, description) if an Unlock row exists for the current tasker and this task.
+
+3. Build the task detail page (/tasks/[id]): shows the locked view by default with an "Unlock for 1 token" button. Clicking it calls the unlock API; on success, reveals the full details in place and they stay visible on future visits (check for an existing unlock on page load, not just after clicking).
+
+4. Add a "My unlocked tasks" view (e.g. /tasks/unlocked) — every task this tasker has ever unlocked, joined from the Unlock table, regardless of the task's current status (open/claimed/done). This list should never lose an entry even after a task's status changes.
+
+5. Show the tasker's current token balance somewhere persistent in the UI (e.g. a header/nav element), so they always know how many tokens they have left before clicking unlock.
+
+Test and show me evidence for: unlocking drops the balance by exactly 1; unlocking the same task twice does not charge twice; unlocking with 0 tokens is blocked with a clear error; a previously unlocked task still shows full details on a fresh page load; and an unlocked task remains in "My unlocked tasks" after manually changing its status in the database.
+
+At the end, summarize what changed and flag anything you think I should decide on (e.g. what happens if a tasker tries to unlock a task that's already been deleted by the client).
+
+
+------------------------
+
+
+This is phase 5 of MapleTasker, building on phases 1-4 (unlock flow working: taskers spend 1 token per unlock, tracked via the Unlock and WalletTransaction tables). This phase adds Stripe so taskers can buy more tokens once their free balance runs out.
+
+Token packs (fixed, not free-form amounts):
+- Starter: 5 tokens for $15.00
+- Standard: 10 tokens for $30.00
+- Bulk: 15 tokens for $40.00
+
+I have a Stripe test-mode account. I'll provide STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET as environment variables in .env.local — use those, don't ask me for the values. Add placeholders to .env.example.
+
+Build in this order:
+
+1. POST /api/wallet/checkout — accepts a pack identifier (starter/standard/bulk), creates a Stripe Checkout Session for that pack's price with the tasker's id in the session metadata, and returns the session URL to redirect the tasker to.
+
+2. Success and cancel pages/routes for Stripe to redirect back to after checkout (e.g. /wallet/success, /wallet/cancel). These should NOT credit tokens directly — they're just user-facing confirmation, since a user can land on a "success" URL without payment actually completing.
+
+3. POST /api/wallet/webhook — a Stripe webhook endpoint that listens for checkout.session.completed, verifies the webhook signature using STRIPE_WEBHOOK_SECRET, looks up the tasker from the session metadata, and is the sole source of truth for crediting tokens.
+   - Before crediting, check whether a WalletTransaction with this Stripe payment/session id already exists. If it does, skip — this makes the handler idempotent against Stripe's at-least-once webhook delivery (it can retry the same event).
+   - Otherwise, insert a WalletTransaction row with type "stripe_topup", the pack's token count as amount, and the Stripe payment id, and increment the tasker's tokenBalance by that amount.
+
+4. Build the /wallet page: shows current token balance, the three packs as buttons (each triggering the checkout flow), and a transaction history table pulled from WalletTransaction (signup grants, unlock spends, and top-ups all shown, oldest or newest first — your call, just be consistent).
+
+Test and show me evidence for: a full test-mode purchase of each pack correctly increases the balance by the right amount; re-sending the same webhook event (Stripe's CLI lets you replay events) does not double-credit; and an incomplete/cancelled checkout does not credit anything.
+
+At the end, tell me exactly how to get Stripe running locally for testing (e.g. the Stripe CLI command to forward webhooks to my dev server), and summarize any new environment variables.
